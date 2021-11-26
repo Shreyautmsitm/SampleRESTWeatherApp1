@@ -1,11 +1,14 @@
 package edu.utexas.mpc.samplerestweatherapp
 
+import android.os.Build
 import android.os.Bundle
+import android.support.annotation.RequiresApi
 import android.support.v7.app.AppCompatActivity
 import android.util.Log
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import com.android.volley.RequestQueue
 import com.android.volley.toolbox.StringRequest
 import com.android.volley.toolbox.Volley
@@ -15,6 +18,10 @@ import org.eclipse.paho.android.service.MqttAndroidClient
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken
 import org.eclipse.paho.client.mqttv3.MqttCallbackExtended
 import org.eclipse.paho.client.mqttv3.MqttMessage
+import java.time.Instant
+import java.time.ZoneId
+import java.util.*
+import java.util.Date
 
 class MainActivity : AppCompatActivity() {
 
@@ -28,8 +35,9 @@ class MainActivity : AppCompatActivity() {
     lateinit var queue: RequestQueue
     lateinit var gson: Gson
     lateinit var mostRecentWeatherResult: WeatherResult
-
+    lateinit var mostRecentWeatherForecast: ForeCastWeatherResult
     lateinit var mqttAndroidClient: MqttAndroidClient
+
 
     // you may need to change this depending on where your MQTT broker is running
     val serverUri = "tcp://192.168.4.14:1883"
@@ -41,6 +49,7 @@ class MainActivity : AppCompatActivity() {
     val publishTopic = "testTopic1"
 
     var weatherData  = ""
+    var weatherForecast  = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,7 +81,7 @@ class MainActivity : AppCompatActivity() {
                 mqttAndroidClient.subscribe(subscribeTopic, 0)
                 val message = MqttMessage()
 
-                message.payload = (weatherData).toByteArray()
+                message.payload = (weatherData + " " + weatherForecast).toByteArray()
                 println("+++ before publish...")
                 println(message)
                 println(publishTopic)
@@ -105,6 +114,8 @@ class MainActivity : AppCompatActivity() {
             com.android.volley.Response.Listener<String> { response ->
                 //textView.text = response
                 mostRecentWeatherResult = gson.fromJson(response, WeatherResult::class.java)
+                println("requestweather")
+
                 textView.text = mostRecentWeatherResult.weather.get(0).main
 
                 val icon: String = mostRecentWeatherResult.weather.get(0).icon
@@ -114,18 +125,59 @@ class MainActivity : AppCompatActivity() {
                 val imageView: ImageView = this.findViewById(R.id.image_view)
                 Picasso.with(this).load(iconUrl).into(imageView)
 
+                Toast.makeText(this@MainActivity,"Switch wifi! Look at your progress!", Toast.LENGTH_SHORT).show()
 
-                Log.v("MainActivity", url);
+                Log.v("request weather", url);
+
+                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd")
+                val date = java.util.Date(mostRecentWeatherResult.dt *1000)
+                val today_date = sdf.format(date)
 
                 weatherData = "WeatherData: "  +
-                        " " +   mostRecentWeatherResult.main.temp_min.toString() +
+                        " " +  today_date +
+                        " " + mostRecentWeatherResult.main.temp_min.toString() +
                         " " + mostRecentWeatherResult.main.temp_max.toString() +
                         " " + mostRecentWeatherResult.main.humidity.toString()
+                println(weatherData)
+
+                requestForecast()
 
             },
+
             com.android.volley.Response.ErrorListener { println("******That didn't work!") }) {}
         // Add the request to the RequestQueue.
         queue.add(stringRequest)
+    }
+
+    fun requestForecast(){
+        //Sending stuff to PI
+        val url_forecast = StringBuilder("https://api.openweathermap.org/data/2.5/forecast?id=524901&appid=ea9d4a9da52aaa9920a1f1ab27e0086e").toString()
+        val forecastRequest = @RequiresApi(Build.VERSION_CODES.O)
+        object : StringRequest(com.android.volley.Request.Method.GET, url_forecast,
+            com.android.volley.Response.Listener<String> { response ->
+                //textView.text = response
+                mostRecentWeatherForecast = gson.fromJson(response, ForeCastWeatherResult::class.java)
+                println("requestforecast")
+
+                Log.v("request forecast", url_forecast);
+                val forecast_epoch_date = mostRecentWeatherForecast.list.get(0).dt
+
+                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd")
+                val date = java.util.Date(forecast_epoch_date*1000)
+                val forecast_date = sdf.format(date)
+
+                weatherForecast = "WeatherForecast: "  +
+                        " " + forecast_date +
+                        " " + mostRecentWeatherForecast.list.get(0).main.temp_min.toString() +
+                        " " + mostRecentWeatherForecast.list.get(0).main.temp_max.toString() +
+                        " " + mostRecentWeatherForecast.list.get(0).main.humidity.toString()
+                println(weatherForecast)
+
+            },
+
+            com.android.volley.Response.ErrorListener { println("******forecast didn't work!") }) {}
+        // Add the request to the RequestQueue.
+        queue.add(forecastRequest)
     }
 
     // this method just connects the paho mqtt client to the broker
@@ -135,7 +187,10 @@ class MainActivity : AppCompatActivity() {
     }
 }
 
-class WeatherResult(val id: Int, val name: String, val cod: Int, val coord: Coordinates, val main: WeatherMain, val weather: Array<Weather>)
+class WeatherResult(val id: Int, val name: String, val cod: Int, val coord: Coordinates, val dt: Long,val main: WeatherMain,val weather: Array<Weather>  )
+class ForeCastWeatherResult(val list: Array<Forecast>)
 class Coordinates(val lon: Double, val lat: Double)
 class Weather(val id: Int, val main: String, val description: String, val icon: String)
+class Forecast(val dt: Long, val main: WeatherMain)
 class WeatherMain(val temp: Double, val pressure: Int, val humidity: Int, val temp_min: Double, val temp_max: Double)
+
